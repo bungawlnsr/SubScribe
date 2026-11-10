@@ -1,0 +1,4 @@
+Bulanan|Netflix|STREAMING|60000.0|2026-12-09|true
+Bulanan|Ml|GAME|120000.0|2026-11-11|true
+Tahunan|Wi-fi|INTERNET|500000.0|2027-12-09|true
+Bulanan|Canva|PRODUKTIVITAS|75000.0|2026-11-15|true
