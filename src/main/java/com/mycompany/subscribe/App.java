@@ -27,14 +27,12 @@ public class App extends Application {
     private Stage stage;
     private Scene sceneUtama;
 
-    // Controls form input
     private final ComboBox<String> cbKategori = new ComboBox<>();
     private final TextField txtNama = new TextField();
     private final TextField txtHarga = new TextField();
     private final ComboBox<String> cbSiklus = new ComboBox<>();
     private final TextField txtTanggal = new TextField();
 
-    // Controls pencarian, dashboard, dan tabel
     private final TextField txtCari = new TextField();
     private final ComboBox<String> cbFilter = new ComboBox<>();
     private final Label lblAktif = new Label();
@@ -47,7 +45,6 @@ public class App extends Application {
         stage = primaryStage;
         daftar.addAll(penyimpanan.muat());
 
-        // ========== 1. CONTROLS ==========
         for (Kategori k : Kategori.values()) {
             cbKategori.getItems().add(k.getLabel());
             cbFilter.getItems().add(k.getLabel());
@@ -71,7 +68,6 @@ public class App extends Application {
         Button btnReset = new Button("Reset Form");
         Button btnRingkasan = new Button("Ringkasan");
 
-        // ========== 2. TABEL ==========
         tabel.getColumns().add(kolom("Layanan", l -> l.getNama()));
         tabel.getColumns().add(kolom("Kategori", l -> l.getKategori().getLabel()));
         tabel.getColumns().add(kolom("Siklus", l -> l.getSiklus()));
@@ -79,13 +75,12 @@ public class App extends Application {
         tabel.getColumns().add(kolom("Jatuh Tempo", l -> l.getTanggalTagihan().format(format)));
         tabel.getColumns().add(kolom("Sisa Hari", l -> l.isAktif() ? l.hitungSisaHari() + " hari" : "-"));
         tabel.getColumns().add(kolom("Status", l -> l.isAktif() ? "Aktif" : "Nonaktif"));
-        double[] lebar = {100, 170, 75, 95, 100, 85, 70};   // lebar minimal tiap kolom
+        double[] lebar = {100, 170, 75, 95, 100, 85, 70};  
         for (int i = 0; i < lebar.length; i++) {
             tabel.getColumns().get(i).setMinWidth(lebar[i]);
         }
         tabel.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
 
-        // Pengingat jatuh tempo: warna baris (memakai interface Pengingat)
         tabel.setRowFactory(tv -> new TableRow<Langganan>() {
             @Override
             protected void updateItem(Langganan l, boolean kosong) {
@@ -109,7 +104,6 @@ public class App extends Application {
             }
         });
 
-        // ========== 3. EVENT HANDLING ==========
         btnTambah.setOnAction(e -> {
             Langganan baru = bacaForm();
             if (baru == null) return;
@@ -159,11 +153,10 @@ public class App extends Application {
         });
 
         btnReset.setOnAction(e -> resetForm());
-        btnRingkasan.setOnAction(e -> stage.setScene(buatSceneRingkasan()));   // pindah halaman
+        btnRingkasan.setOnAction(e -> stage.setScene(buatSceneRingkasan()));   
         txtCari.textProperty().addListener((obs, a, b) -> terapkanFilter());
         cbFilter.valueProperty().addListener((obs, a, b) -> terapkanFilter());
 
-        // ========== 4. LAYOUT ==========
         Label judul = new Label("SubScribe - Smart Economy");
         judul.setStyle("-fx-font-size: 22px; -fx-font-weight: bold;");
         HBox dashboard = new HBox(30, lblAktif, lblTagihan, lblTahunan);
@@ -196,7 +189,6 @@ public class App extends Application {
         VBox rootLayout = new VBox(15, judul, dashboard, isi);
         rootLayout.setPadding(new Insets(20));
 
-        // ========== 5. SCENE & STAGE ==========
         simpanDanPerbarui();
         sceneUtama = new Scene(rootLayout, 1150, 560);
         primaryStage.setTitle("SubScribe - Pencatatan Langganan Digital");
@@ -209,7 +201,6 @@ public class App extends Application {
         penyimpanan.simpan(daftar);
     }
 
-    // ========== HALAMAN RINGKASAN (Scene kedua) ==========
     private Scene buatSceneRingkasan() {
         Label judul = new Label("Ringkasan Pengeluaran");
         judul.setStyle("-fx-font-size: 22px; -fx-font-weight: bold;");
@@ -231,8 +222,8 @@ public class App extends Application {
             for (Langganan l : daftar) {
                 if (l.isAktif() && l.getKategori() == k) {
                     jumlah++;
-                    if (l.getSiklus().equals("Bulanan")) bulanan += l.hitungBiayaBulanan();     // polymorphism
-                    else tahunan += l.hitungBiayaTahunan();                                      // polymorphism
+                    if (l.getSiklus().equals("Bulanan")) bulanan += l.hitungBiayaBulanan();     
+                    else tahunan += l.hitungBiayaTahunan();                                     
                 }
             }
             totalJumlah += jumlah;
@@ -244,6 +235,7 @@ public class App extends Application {
             tb.add(new Label(tahunan == 0 ? "-" : rupiah(tahunan)), 3, baris);
             baris++;
         }
+        
         tb.add(tebal("Total Keseluruhan"), 0, baris);
         tb.add(tebal(String.valueOf(totalJumlah)), 1, baris);
         tb.add(tebal(rupiah(totalBulanan)), 2, baris);
@@ -254,14 +246,13 @@ public class App extends Application {
         Label ket = new Label("Gabungan nominal langganan bulanan dan tahunan sesuai harga yang diinput, bukan tagihan per bulan.");
 
         Button btnKembali = new Button("Kembali ke Dashboard");
-        btnKembali.setOnAction(e -> stage.setScene(sceneUtama));   // kembali ke Scene utama
+        btnKembali.setOnAction(e -> stage.setScene(sceneUtama));   
 
         VBox layout = new VBox(18, judul, tb, total, ket, btnKembali);
         layout.setPadding(new Insets(20));
         return new Scene(layout, sceneUtama.getWidth(), sceneUtama.getHeight());
     }
 
-    // ========== VALIDASI & ERROR HANDLING ==========
     private Langganan bacaForm() {
         String nama = txtNama.getText().trim();
         String strHarga = txtHarga.getText().trim().replace(".", "");
@@ -274,7 +265,6 @@ public class App extends Application {
             return null;
         }
 
-        // B. Error handling konversi data
         try {
             double harga = Double.parseDouble(strHarga);
             LocalDate tanggal = LocalDate.parse(strTanggal, format);
@@ -288,7 +278,7 @@ public class App extends Application {
         } catch (DateTimeParseException ex) {
             tampilkanAlert(AlertType.ERROR, "Kesalahan Format", "Tanggal harus berformat dd-MM-yyyy, contoh: 15-12-2026");
         } catch (IllegalArgumentException ex) {
-            tampilkanAlert(AlertType.WARNING, "Peringatan", ex.getMessage());   // dari validasi setter
+            tampilkanAlert(AlertType.WARNING, "Peringatan", ex.getMessage());   
         }
         return null;
     }
@@ -301,7 +291,6 @@ public class App extends Application {
         alert.showAndWait();
     }
 
-    // ========== METHOD BANTUAN ==========
     private void simpanDanPerbarui() {
         penyimpanan.simpan(daftar);
         LocalDate sekarang = LocalDate.now();
@@ -311,7 +300,7 @@ public class App extends Application {
             if (l.isAktif()) {
                 aktif++;
                 if (l.getSiklus().equals("Tahunan")) {
-                    totalTahunan += l.hitungBiayaTahunan();     // polymorphism
+                    totalTahunan += l.hitungBiayaTahunan();    
                 }
                 LocalDate t = l.getTanggalTagihan();
                 if (t.getMonth() == sekarang.getMonth() && t.getYear() == sekarang.getYear()) {
