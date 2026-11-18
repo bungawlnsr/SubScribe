@@ -3,298 +3,372 @@ package com.mycompany.subscribe;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
-import java.util.Scanner;
+import java.util.function.Function;
+import javafx.application.Application;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
+import javafx.geometry.Insets;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.control.Alert.AlertType;
+import javafx.scene.layout.*;
+import javafx.stage.Stage;
 
-public class App {
-    private static final Scanner input = new Scanner(System.in);
-    private static final DateTimeFormatter FORMAT_TGL = DateTimeFormatter.ofPattern("dd-MM-yyyy");
-    private static final Locale ID = Locale.forLanguageTag("id-ID");
-    private static final String RESET = "\u001B[0m";
+public class App extends Application {
 
-    public static void main(String[] args) {
-        PenyimpananFile penyimpanan = new PenyimpananFile("data_langganan.txt");
-        List<Langganan> daftar = penyimpanan.muat();  
-        
-        tampilkanDashboard(daftar);
+    private final PenyimpananFile penyimpanan = new PenyimpananFile("data_langganan.txt");
+    private final ObservableList<Langganan> daftar = FXCollections.observableArrayList();
+    private final FilteredList<Langganan> tampil = new FilteredList<>(daftar, l -> true);
+    private final DateTimeFormatter format = DateTimeFormatter.ofPattern("dd-MM-yyyy");
 
-        boolean jalan = true;
-        while (jalan) {
-            System.out.println("\n=== MENU SUBSCRIBE ===");
-            System.out.println("1. Tambah langganan");
-            System.out.println("2. Lihat daftar langganan");
-            System.out.println("3. Ubah langganan");
-            System.out.println("4. Hapus langganan");
-            System.out.println("5. Aktifkan / nonaktifkan langganan");
-            System.out.println("6. Cari / filter kategori");
-            System.out.println("7. Ringkasan pengeluaran");
-            System.out.println("0. Simpan & keluar");
-            int pilihan = bacaInt("Pilih menu: ", 0, 7);
+    private Stage stage;
+    private Scene sceneUtama;
 
-            switch (pilihan) {
-                case 1: tambah(daftar); break;
-                case 2: tampilkanTabel(daftar); break;
-                case 3: ubah(daftar); break;
-                case 4: hapus(daftar); break;
-                case 5: toggleAktif(daftar); break;
-                case 6: cari(daftar); break;
-                case 7: ringkasan(daftar); break;
-                case 0:
-                    penyimpanan.simpan(daftar);
-                    System.out.println("Data tersimpan. Sampai jumpa!");
-                    jalan = false;
-                    break;
+    // Controls form input
+    private final ComboBox<String> cbKategori = new ComboBox<>();
+    private final TextField txtNama = new TextField();
+    private final TextField txtHarga = new TextField();
+    private final ComboBox<String> cbSiklus = new ComboBox<>();
+    private final TextField txtTanggal = new TextField();
+
+    // Controls pencarian, dashboard, dan tabel
+    private final TextField txtCari = new TextField();
+    private final ComboBox<String> cbFilter = new ComboBox<>();
+    private final Label lblAktif = new Label();
+    private final Label lblTagihan = new Label();
+    private final Label lblTahunan = new Label();
+    private final TableView<Langganan> tabel = new TableView<>(tampil);
+
+    @Override
+    public void start(Stage primaryStage) {
+        stage = primaryStage;
+        daftar.addAll(penyimpanan.muat());
+
+        // ========== 1. CONTROLS ==========
+        for (Kategori k : Kategori.values()) {
+            cbKategori.getItems().add(k.getLabel());
+            cbFilter.getItems().add(k.getLabel());
+        }
+        cbFilter.getItems().add(0, "Semua kategori");
+        cbFilter.setValue("Semua kategori");
+        cbSiklus.getItems().addAll("Bulanan", "Tahunan");
+        cbKategori.setPromptText("Pilih kategori");
+        cbSiklus.setPromptText("Pilih siklus");
+        cbKategori.setMaxWidth(Double.MAX_VALUE);
+        cbSiklus.setMaxWidth(Double.MAX_VALUE);
+        txtNama.setPromptText("Contoh: Netflix");
+        txtHarga.setPromptText("Contoh: 54000");
+        txtTanggal.setPromptText("Contoh: 15-12-2026");
+        txtCari.setPromptText("Cari nama layanan...");
+
+        Button btnTambah = new Button("Tambah");
+        Button btnUbah = new Button("Ubah");
+        Button btnHapus = new Button("Hapus");
+        Button btnToggle = new Button("Aktif / Nonaktif");
+        Button btnReset = new Button("Reset Form");
+        Button btnRingkasan = new Button("Ringkasan");
+
+        // ========== 2. TABEL ==========
+        tabel.getColumns().add(kolom("Layanan", l -> l.getNama()));
+        tabel.getColumns().add(kolom("Kategori", l -> l.getKategori().getLabel()));
+        tabel.getColumns().add(kolom("Siklus", l -> l.getSiklus()));
+        tabel.getColumns().add(kolom("Harga", l -> rupiah(l.getHarga())));
+        tabel.getColumns().add(kolom("Jatuh Tempo", l -> l.getTanggalTagihan().format(format)));
+        tabel.getColumns().add(kolom("Sisa Hari", l -> l.isAktif() ? l.hitungSisaHari() + " hari" : "-"));
+        tabel.getColumns().add(kolom("Status", l -> l.isAktif() ? "Aktif" : "Nonaktif"));
+        double[] lebar = {100, 170, 75, 95, 100, 85, 70};   // lebar minimal tiap kolom
+        for (int i = 0; i < lebar.length; i++) {
+            tabel.getColumns().get(i).setMinWidth(lebar[i]);
+        }
+        tabel.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+        // Pengingat jatuh tempo: warna baris (memakai interface Pengingat)
+        tabel.setRowFactory(tv -> new TableRow<Langganan>() {
+            @Override
+            protected void updateItem(Langganan l, boolean kosong) {
+                super.updateItem(l, kosong);
+                if (kosong || l == null) setStyle("");
+                else if (!l.isAktif()) setStyle(warna("#E0E0E0"));
+                else if (l.tentukanWarna().equals("MERAH")) setStyle(warna("#FFCDD2"));
+                else if (l.tentukanWarna().equals("KUNING")) setStyle(warna("#FFF9C4"));
+                else setStyle(warna("#C8E6C9"));
             }
-        }
-    }
+        });
 
-    private static void tambah(List<Langganan> daftar) {
-        System.out.println("\n--- Tambah Langganan ---");
-        Kategori kategori = pilihKategori();
-        String nama = bacaTeks("Nama layanan: ");
-        double harga = bacaHarga("Harga: ");
-        System.out.println("Siklus tagihan: 1. Bulanan  2. Tahunan");
-        int siklus = bacaInt("Pilih siklus: ", 1, 2);
-        LocalDate tgl = bacaTanggal("Tanggal tagihan berikutnya: ");
-
-        Langganan baru;
-        if (siklus == 1) {
-            baru = new LanggananBulanan(nama, kategori, harga, tgl);
-        } else {
-            baru = new LanggananTahunan(nama, kategori, harga, tgl);
-        }
-        daftar.add(baru);
-        System.out.println("Langganan \"" + baru.getNama() + "\" berhasil ditambahkan.");
-    }
-
-    private static void ubah(List<Langganan> daftar) {
-        Langganan l = pilihLangganan(daftar, "diubah");
-        if (l == null) return;
-        System.out.println("(Siklus tidak dapat diubah; hapus lalu tambah ulang bila perlu.)");
-        System.out.println("Kosongkan input dan tekan Enter untuk mempertahankan nilai lama.");
-
-        System.out.print("Nama [" + l.getNama() + "]: ");
-        String nama = input.nextLine().trim();
-        if (!nama.isEmpty()) l.setNama(nama);
-
-        System.out.print("Ubah kategori? (y/n): ");
-        if (input.nextLine().trim().equalsIgnoreCase("y")) l.setKategori(pilihKategori());
-
-        System.out.print("Harga [" + rupiah(l.getHarga()) + "]: ");
-        String h = input.nextLine().trim();
-        if (!h.isEmpty()) {
-            try {
-                l.setHarga(Double.parseDouble(h));
-            } catch (Exception e) {
-                System.out.println("Harga tidak valid");
+        // Klik baris tabel -> isi form
+        tabel.getSelectionModel().selectedItemProperty().addListener((obs, lama, l) -> {
+            if (l != null) {
+                cbKategori.setValue(l.getKategori().getLabel());
+                txtNama.setText(l.getNama());
+                txtHarga.setText(String.valueOf((long) l.getHarga()));
+                cbSiklus.setValue(l.getSiklus());
+                txtTanggal.setText(l.getTanggalTagihan().format(format));
             }
-        }
+        });
 
-        System.out.print("Tanggal tagihan [" + l.getTanggalTagihan().format(FORMAT_TGL) + "]: ");
-        String t = input.nextLine().trim();
-        if (!t.isEmpty()) {
-            try {
-                l.setTanggalTagihan(LocalDate.parse(t, FORMAT_TGL));
-            } catch (DateTimeParseException e) {
-                System.out.println("Format tanggal salah");
+        // ========== 3. EVENT HANDLING ==========
+        btnTambah.setOnAction(e -> {
+            Langganan baru = bacaForm();
+            if (baru == null) return;
+            daftar.add(baru);
+            simpanDanPerbarui();
+            resetForm();
+            tampilkanAlert(AlertType.INFORMATION, "Berhasil", "Langganan \"" + baru.getNama() + "\" ditambahkan.");
+        });
+
+        btnUbah.setOnAction(e -> {
+            Langganan lama = tabel.getSelectionModel().getSelectedItem();
+            if (lama == null) {
+                tampilkanAlert(AlertType.WARNING, "Peringatan", "Pilih dulu langganan di tabel!");
+                return;
             }
-        }
-        System.out.println("Data berhasil diperbarui.");
+            Langganan baru = bacaForm();
+            if (baru == null) return;
+            baru.setAktif(lama.isAktif());
+            daftar.set(daftar.indexOf(lama), baru);
+            simpanDanPerbarui();
+            tampilkanAlert(AlertType.INFORMATION, "Berhasil", "Data langganan diperbarui.");
+        });
+
+        btnHapus.setOnAction(e -> {
+            Langganan l = tabel.getSelectionModel().getSelectedItem();
+            if (l == null) {
+                tampilkanAlert(AlertType.WARNING, "Peringatan", "Pilih dulu langganan di tabel!");
+                return;
+            }
+            Alert konfirmasi = new Alert(AlertType.CONFIRMATION, "Hapus \"" + l.getNama() + "\"?",
+                    ButtonType.YES, ButtonType.NO);
+            if (konfirmasi.showAndWait().orElse(ButtonType.NO) == ButtonType.YES) {
+                daftar.remove(l);
+                simpanDanPerbarui();
+                resetForm();
+            }
+        });
+
+        btnToggle.setOnAction(e -> {
+            Langganan l = tabel.getSelectionModel().getSelectedItem();
+            if (l == null) {
+                tampilkanAlert(AlertType.WARNING, "Peringatan", "Pilih dulu langganan di tabel!");
+                return;
+            }
+            l.setAktif(!l.isAktif());
+            simpanDanPerbarui();
+        });
+
+        btnReset.setOnAction(e -> resetForm());
+        btnRingkasan.setOnAction(e -> stage.setScene(buatSceneRingkasan()));   // pindah halaman
+        txtCari.textProperty().addListener((obs, a, b) -> terapkanFilter());
+        cbFilter.valueProperty().addListener((obs, a, b) -> terapkanFilter());
+
+        // ========== 4. LAYOUT ==========
+        Label judul = new Label("SubScribe - Smart Economy");
+        judul.setStyle("-fx-font-size: 22px; -fx-font-weight: bold;");
+        HBox dashboard = new HBox(30, lblAktif, lblTagihan, lblTahunan);
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(12);
+        grid.add(new Label("Kategori:"), 0, 0);
+        grid.add(cbKategori, 1, 0);
+        grid.add(new Label("Nama Layanan:"), 0, 1);
+        grid.add(txtNama, 1, 1);
+        grid.add(new Label("Harga (Rp):"), 0, 2);
+        grid.add(txtHarga, 1, 2);
+        grid.add(new Label("Siklus Tagihan:"), 0, 3);
+        grid.add(cbSiklus, 1, 3);
+        grid.add(new Label("Jatuh Tempo:"), 0, 4);
+        grid.add(txtTanggal, 1, 4);
+        grid.add(new HBox(8, btnTambah, btnUbah, btnHapus), 0, 5, 2, 1);
+        grid.add(new HBox(8, btnToggle, btnReset, btnRingkasan), 0, 6, 2, 1);
+
+        HBox pencarian = new HBox(10, txtCari, cbFilter);
+        HBox.setHgrow(txtCari, Priority.ALWAYS);
+        VBox kanan = new VBox(10, pencarian, tabel);
+        VBox.setVgrow(tabel, Priority.ALWAYS);
+        HBox.setHgrow(kanan, Priority.ALWAYS);
+
+        HBox isi = new HBox(20, grid, kanan);
+        VBox.setVgrow(isi, Priority.ALWAYS);
+
+        VBox rootLayout = new VBox(15, judul, dashboard, isi);
+        rootLayout.setPadding(new Insets(20));
+
+        // ========== 5. SCENE & STAGE ==========
+        simpanDanPerbarui();
+        sceneUtama = new Scene(rootLayout, 1150, 560);
+        primaryStage.setTitle("SubScribe - Pencatatan Langganan Digital");
+        primaryStage.setScene(sceneUtama);
+        primaryStage.show();
     }
 
-    private static void hapus(List<Langganan> daftar) {
-        Langganan l = pilihLangganan(daftar, "dihapus");
-        if (l == null) return;
-        System.out.print("Yakin hapus \"" + l.getNama() + "\" secara permanen? (y/n): ");
-        if (input.nextLine().trim().equalsIgnoreCase("y")) {
-            daftar.remove(l);
-            System.out.println("Langganan dihapus.");
-        } else {
-            System.out.println("Dibatalkan.");
-        }
+    @Override
+    public void stop() {
+        penyimpanan.simpan(daftar);
     }
 
-    private static void toggleAktif(List<Langganan> daftar) {
-        Langganan l = pilihLangganan(daftar, "diubah statusnya");
-        if (l == null) return;
-        l.setAktif(!l.isAktif());
-        System.out.println("\"" + l.getNama() + "\" sekarang " + (l.isAktif() ? "AKTIF" : "NONAKTIF")
-                + " (hanya status pencatatan di aplikasi ini).");
-    }
+    // ========== HALAMAN RINGKASAN (Scene kedua) ==========
+    private Scene buatSceneRingkasan() {
+        Label judul = new Label("Ringkasan Pengeluaran");
+        judul.setStyle("-fx-font-size: 22px; -fx-font-weight: bold;");
 
-    private static void cari(List<Langganan> daftar) {
-        System.out.print("Kata kunci nama (kosongkan untuk semua): ");
-        String kunci = input.nextLine().trim().toLowerCase();
-        System.out.println("Filter kategori: 0. Semua kategori");
-        Kategori[] semua = Kategori.values();
-        for (int i = 0; i < semua.length; i++) {
-            System.out.println((i + 1) + ". " + semua[i].getLabel());
+        GridPane tb = new GridPane();
+        tb.setHgap(60);
+        tb.setVgap(12);
+        String[] judulKolom = {"Kategori", "Jumlah", "Bulanan", "Tahunan"};
+        for (int i = 0; i < judulKolom.length; i++) {
+            tb.add(tebal(judulKolom[i]), i, 0);
         }
-        int p = bacaInt("Pilih: ", 0, semua.length);
 
-        List<Langganan> hasil = new ArrayList<>();
-        for (Langganan l : daftar) {
-            boolean cocokNama = l.getNama().toLowerCase().contains(kunci);
-            boolean cocokKategori = (p == 0) || l.getKategori() == semua[p - 1];
-            if (cocokNama && cocokKategori) hasil.add(l);
-        }
-        tampilkanTabel(hasil);
-    }
-
-    private static void ringkasan(List<Langganan> daftar) {
-        System.out.println("\n=== RINGKASAN PENGELUARAN (langganan aktif) ===");
-        double totalBulan = 0, totalTahun = 0;
-        System.out.printf("%-26s %6s %18s %18s%n", "Kategori", "Jumlah", "Per Bulan", "Per Tahun");
+        int totalJumlah = 0;
+        double totalBulanan = 0, totalTahunan = 0;
+        int baris = 1;
         for (Kategori k : Kategori.values()) {
             int jumlah = 0;
-            double bulan = 0, tahun = 0;
+            double bulanan = 0, tahunan = 0;
             for (Langganan l : daftar) {
                 if (l.isAktif() && l.getKategori() == k) {
                     jumlah++;
-                    bulan += l.hitungBiayaBulanan();   
-                    tahun += l.hitungBiayaTahunan();   
+                    if (l.getSiklus().equals("Bulanan")) bulanan += l.hitungBiayaBulanan();     // polymorphism
+                    else tahunan += l.hitungBiayaTahunan();                                      // polymorphism
                 }
             }
-            totalBulan += bulan;
-            totalTahun += tahun;
-            System.out.printf("%-26s %6d %18s %18s%n", k.getLabel(), jumlah, rupiah(bulan), rupiah(tahun));
+            totalJumlah += jumlah;
+            totalBulanan += bulanan;
+            totalTahunan += tahunan;
+            tb.add(new Label(k.getLabel()), 0, baris);
+            tb.add(new Label(String.valueOf(jumlah)), 1, baris);
+            tb.add(new Label(bulanan == 0 ? "-" : rupiah(bulanan)), 2, baris);
+            tb.add(new Label(tahunan == 0 ? "-" : rupiah(tahunan)), 3, baris);
+            baris++;
         }
-        System.out.println("-".repeat(72));
-        System.out.printf("%-26s %6s %18s %18s%n", "TOTAL", "", rupiah(totalBulan), rupiah(totalTahun));
-        System.out.println("Estimasi pengeluaran setahun: " + rupiah(totalTahun));
+        tb.add(tebal("Total Keseluruhan"), 0, baris);
+        tb.add(tebal(String.valueOf(totalJumlah)), 1, baris);
+        tb.add(tebal(rupiah(totalBulanan)), 2, baris);
+        tb.add(tebal(rupiah(totalTahunan)), 3, baris);
+
+        Label total = tebal("Total Seluruh Langganan: " + rupiah(totalBulanan + totalTahunan));
+        total.setStyle("-fx-font-weight: bold; -fx-font-size: 16px;");
+        Label ket = new Label("Gabungan nominal langganan bulanan dan tahunan sesuai harga yang diinput, bukan tagihan per bulan.");
+
+        Button btnKembali = new Button("Kembali ke Dashboard");
+        btnKembali.setOnAction(e -> stage.setScene(sceneUtama));   // kembali ke Scene utama
+
+        VBox layout = new VBox(18, judul, tb, total, ket, btnKembali);
+        layout.setPadding(new Insets(20));
+        return new Scene(layout, sceneUtama.getWidth(), sceneUtama.getHeight());
     }
 
-        private static void tampilkanDashboard(List<Langganan> daftar) {
-        LocalDate sekarang = LocalDate.now();
-        double tagihanBulanIni = 0;
-        double rataBulanan = 0;
-        int aktif = 0;
+    // ========== VALIDASI & ERROR HANDLING ==========
+    private Langganan bacaForm() {
+        String nama = txtNama.getText().trim();
+        String strHarga = txtHarga.getText().trim().replace(".", "");
+        String strTanggal = txtTanggal.getText().trim();
 
+        // A. Validasi kolom kosong
+        if (cbKategori.getValue() == null || cbSiklus.getValue() == null
+                || nama.isEmpty() || strHarga.isEmpty() || strTanggal.isEmpty()) {
+            tampilkanAlert(AlertType.WARNING, "Peringatan", "Seluruh kolom form wajib diisi!");
+            return null;
+        }
+
+        // B. Error handling konversi data
+        try {
+            double harga = Double.parseDouble(strHarga);
+            LocalDate tanggal = LocalDate.parse(strTanggal, format);
+            Kategori kategori = cariKategori(cbKategori.getValue());
+            if (cbSiklus.getValue().equals("Bulanan")) {
+                return new LanggananBulanan(nama, kategori, harga, tanggal);
+            }
+            return new LanggananTahunan(nama, kategori, harga, tanggal);
+        } catch (NumberFormatException ex) {
+            tampilkanAlert(AlertType.ERROR, "Kesalahan Format", "Harga harus berupa angka, contoh: 54000");
+        } catch (DateTimeParseException ex) {
+            tampilkanAlert(AlertType.ERROR, "Kesalahan Format", "Tanggal harus berformat dd-MM-yyyy, contoh: 15-12-2026");
+        } catch (IllegalArgumentException ex) {
+            tampilkanAlert(AlertType.WARNING, "Peringatan", ex.getMessage());   // dari validasi setter
+        }
+        return null;
+    }
+
+    private void tampilkanAlert(AlertType tipe, String judul, String pesan) {
+        Alert alert = new Alert(tipe);
+        alert.setTitle(judul);
+        alert.setHeaderText(null);
+        alert.setContentText(pesan);
+        alert.showAndWait();
+    }
+
+    // ========== METHOD BANTUAN ==========
+    private void simpanDanPerbarui() {
+        penyimpanan.simpan(daftar);
+        LocalDate sekarang = LocalDate.now();
+        int aktif = 0;
+        double tagihanBulanIni = 0, totalTahunan = 0;
         for (Langganan l : daftar) {
             if (l.isAktif()) {
                 aktif++;
-                rataBulanan += l.hitungBiayaBulanan();
-
-                LocalDate tgl = l.getTanggalTagihan();
-                if (tgl.getMonth() == sekarang.getMonth() && tgl.getYear() == sekarang.getYear()) {
+                if (l.getSiklus().equals("Tahunan")) {
+                    totalTahunan += l.hitungBiayaTahunan();     // polymorphism
+                }
+                LocalDate t = l.getTanggalTagihan();
+                if (t.getMonth() == sekarang.getMonth() && t.getYear() == sekarang.getYear()) {
                     tagihanBulanIni += l.getHarga();
                 }
             }
         }
-        System.out.println("\n==================================================");
-        System.out.println("  SUBSCRIBE");
-        System.out.println("  Langganan aktif            : " + aktif + " dari " + daftar.size());
-        System.out.println("  Total tagihan bulan ini    : " + rupiah(tagihanBulanIni));
-        System.out.println("  Rata-rata pengeluaran/bulan: " + rupiah(rataBulanan));
-        System.out.println("==================================================");
-        tampilkanTabel(daftar);
+        lblAktif.setText("Langganan aktif: " + aktif + " dari " + daftar.size());
+        lblTagihan.setText("Tagihan bulan ini: " + rupiah(tagihanBulanIni));
+        lblTahunan.setText("Total langganan tahunan: " + rupiah(totalTahunan));
+        tabel.refresh();
     }
 
-    private static void tampilkanTabel(List<Langganan> daftar) {
-        if (daftar.isEmpty()) {
-            System.out.println("(Belum ada data langganan.)");
-            return;
+    private void terapkanFilter() {
+        String kunci = txtCari.getText().trim().toLowerCase();
+        String kat = cbFilter.getValue();
+        tampil.setPredicate(l -> l.getNama().toLowerCase().contains(kunci)
+                && (kat.equals("Semua kategori") || l.getKategori().getLabel().equals(kat)));
+    }
+
+    private void resetForm() {
+        tabel.getSelectionModel().clearSelection();
+        cbKategori.setValue(null);
+        cbSiklus.setValue(null);
+        txtNama.clear();
+        txtHarga.clear();
+        txtTanggal.clear();
+    }
+
+    private Kategori cariKategori(String label) {
+        for (Kategori k : Kategori.values()) {
+            if (k.getLabel().equals(label)) return k;
         }
-        System.out.printf("%-3s %-20s %-24s %-8s %14s %-12s %-10s %-8s%n",
-                "No", "Layanan", "Kategori", "Siklus", "Harga", "Jatuh Tempo", "Sisa Hari", "Status");
-        System.out.println("-".repeat(108));
-        for (int i = 0; i < daftar.size(); i++) {
-            Langganan l = daftar.get(i);
-            String sisa, warna = "", reset = "";
-            if (l.isAktif()) {
-                sisa = l.hitungSisaHari() + " hari";
-                warna = kodeAnsi(l.tentukanWarna());
-                reset = RESET;
-            } else {
-                sisa = "-";
-            }
-            System.out.printf("%s%-3d %-20s %-24s %-8s %14s %-12s %-10s %-8s%s%n",
-                    warna, i + 1, potong(l.getNama(), 20), l.getKategori().getLabel(), l.getSiklus(),
-                    rupiah(l.getHarga()), l.getTanggalTagihan().format(FORMAT_TGL), sisa,
-                    l.isAktif() ? l.tentukanWarna() : "NONAKTIF", reset);
-        }
-        System.out.println("Keterangan: MERAH <= 3 hari | KUNING 4-7 hari | HIJAU aman");
+        return null;
     }
 
-    private static Kategori pilihKategori() {
-        Kategori[] semua = Kategori.values();
-        System.out.println("Pilih kategori:");
-        for (int i = 0; i < semua.length; i++) {
-            System.out.println((i + 1) + ". " + semua[i].getLabel());
-        }
-        return semua[bacaInt("Pilih kategori: ", 1, semua.length) - 1];
+    private TableColumn<Langganan, String> kolom(String judul, Function<Langganan, String> isi) {
+        TableColumn<Langganan, String> k = new TableColumn<>(judul);
+        k.setCellValueFactory(c -> new SimpleStringProperty(isi.apply(c.getValue())));
+        return k;
     }
 
-    private static Langganan pilihLangganan(List<Langganan> daftar, String aksi) {
-        if (daftar.isEmpty()) {
-            System.out.println("Belum ada data langganan.");
-            return null;
-        }
-        tampilkanTabel(daftar);
-        int no = bacaInt("Nomor langganan yang akan " + aksi + " (0 = batal): ", 0, daftar.size());
-        return no == 0 ? null : daftar.get(no - 1);
+    private Label tebal(String teks) {
+        Label l = new Label(teks);
+        l.setStyle("-fx-font-weight: bold;");
+        return l;
     }
 
-    private static int bacaInt(String pesan, int min, int max) {
-        while (true) {
-            System.out.print(pesan);
-            try {
-                int n = Integer.parseInt(input.nextLine().trim());
-                if (n >= min && n <= max) return n;
-            } catch (NumberFormatException e) {
-                // jatuh ke pesan error di bawah
-            }
-            System.out.println("Input tidak valid. Masukkan angka " + min + "-" + max + ".");
-        }
+    private String warna(String hex) {
+        return "-fx-control-inner-background: " + hex + "; -fx-control-inner-background-alt: " + hex + ";";
     }
 
-    private static double bacaHarga(String pesan) {
-        while (true) {
-            System.out.print(pesan);
-            try {
-                double h = Double.parseDouble(input.nextLine().trim());
-                if (h > 0) return h;
-            } catch (NumberFormatException e) {
-            }
-            System.out.println("Harga harus berupa angka positif.");
-        }
+    private String rupiah(double nilai) {
+        return String.format(Locale.forLanguageTag("id-ID"), "Rp %,.0f", nilai);
     }
 
-    private static String bacaTeks(String pesan) {
-        while (true) {
-            System.out.print(pesan);
-            String s = input.nextLine().trim();
-            if (!s.isEmpty()) return s;
-            System.out.println("Input tidak boleh kosong.");
-        }
-    }
-
-    private static LocalDate bacaTanggal(String pesan) {
-        while (true) {
-            System.out.print(pesan);
-            try {
-                return LocalDate.parse(input.nextLine().trim(), FORMAT_TGL);
-            } catch (DateTimeParseException e) {
-                System.out.println("Format tanggal salah. Contoh: 15-12-2026");
-            }
-        }
-    }
-
-    private static String rupiah(double nilai) {
-        return String.format(ID, "Rp %,.0f", nilai);
-    }
-
-    private static String potong(String s, int maks) {
-        return s.length() <= maks ? s : s.substring(0, maks - 1) + "~";
-    }
-
-    private static String kodeAnsi(String warna) {
-        switch (warna) {
-            case "MERAH":  return "\u001B[31m";
-            case "KUNING": return "\u001B[33m";
-            default:       return "\u001B[32m";
-        }
+    public static void main(String[] args) {
+        launch(args);
     }
 }
